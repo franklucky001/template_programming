@@ -161,6 +161,9 @@ struct MapIterator : public Iterator<T>{
         }
         return *it;
     };
+    bool test(value_type& value){
+        return this->_iter.test(value);
+    }
     InnerIter&  begin(){
         return InnerIter(*this, 0);
     }
@@ -227,7 +230,7 @@ struct FilterIterator: public Iterator<T>{
         return *it;
     };
     bool test(value_type& value){
-        return this->_predicate(value);
+        return this->_predicate(value) && this->_iter.test(value);
     }
     InnerIter&  begin(){
         return InnerIter(*this, 0);
