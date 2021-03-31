@@ -10,151 +10,230 @@
 
 using namespace std;
 
-template<typename T, typename IterType, typename Fn> struct MapIterator;
-template<typename  T, typename IterType, typename Predicate> struct FilterIterator;
+template<typename T, typename Fn> struct MapIterator;
+template<typename  T, typename Predicate> struct FilterIterator;
 
-template<typename T, typename IterType>
+template<typename T>
 struct Iterator {
     using value_type = T;
+    using Self =  Iterator<T>;
     Iterator() = default;
-    Iterator(const Iterator<T, IterType>& other) = default;
-    Iterator(Iterator<T, IterType>&& other)  noexcept = default;
+    Iterator(const Self& other) = default;
+    Iterator(Self&& other)  noexcept = default;
     virtual ~Iterator() = default;
+    class InnerIter {
+    protected:
+        Self & _inner_iter;
+        size_t _index;
+    public:
+        InnerIter(Self & iter, size_t n): _inner_iter(iter), _index(n){
 
-    virtual Iterator<T, IterType>& operator++()  {
-        if(this->current() != this->end()){
-            auto cur = this->current();
-            ++cur;
         }
-        return *this;
-    }
-    virtual value_type operator*(){
-        auto cur = this->current();
-        return *cur;
-    }
-    bool operator != (const Iterator<T, IterType>& other){
-        return this->begin() != other.begin() && this->end() != other.end() && this->current() != other.current();
-    }
+        virtual bool operator != (const  InnerIter& other){
+            return other._index != this->_index;
+        }
 
-    virtual IterType begin() = 0;
-    virtual IterType current() = 0;
-    virtual IterType end() = 0;
+        virtual value_type& operator* (){
+            return this->_inner_iter.get(_index);
+        }
+
+        virtual const InnerIter& operator++(){
+            ++_index;
+            return *this;
+        }
+    };
+    virtual InnerIter& begin() = 0;
+    virtual InnerIter& end() = 0;
+    virtual size_t size() = 0;
+    virtual value_type & get(size_t idx) = 0;
     template<typename Fn>
-    auto map(Fn && f)->MapIterator<typename std::result_of_t<Fn(T)>, IterType, decltype(f)>{
+    auto map(Fn && f)->MapIterator<typename std::result_of_t<Fn(T)>, decltype(f)>{
         using Return = typename std::result_of_t<Fn(T)>;
-        return MapIterator<Return, IterType, decltype(f)>(*this, std::forward<decltype(f)>(f));
+        return MapIterator<Return, decltype(f)>(*this, std::forward<decltype(f)>(f));
     }
-
     template<typename Predicate>
-    auto filter(Predicate && predicate) ->FilterIterator<T, IterType, decltype(predicate)>{
-        return FilterIterator<T, IterType, decltype(predicate)>(*this, std::forward<decltype(predicate)>(predicate));
+    auto filter(Predicate && predicate) ->FilterIterator<T, decltype(predicate)>{
+        return FilterIterator<T, decltype(predicate)>(*this, std::forward<decltype(predicate)>(predicate));
     }
+    virtual std::vector<value_type> collection() = 0;
 };
 template <typename Container>
-struct IteratorWrapper : public Iterator<typename Container::value_type, typename Container::iterator>{
-    using IterType = typename Container::iterator;
-//    using value_type = typename Container::value_type;
+struct IteratorWrapper : public Iterator<typename Container::value_type>{
+    using Self = IteratorWrapper<Container>;
+    using Super = Iterator<typename Container::value_type>;
+    using std_iterator = typename Container::iterator;
+    using value_type = typename Container::value_type;
+
+    class InnerIter : public Super::InnerIter{
+        public:
+            InnerIter(Super& _iter, size_t n): Super::InnerIter(_iter, n){}
+            bool operator != (const  InnerIter& other){
+                return other._index != this->_index;
+            }
+            value_type& operator* (){
+                return this->_inner_iter.get(this->_index);
+            }
+            const InnerIter& operator++(){
+                ++this->_index;
+                return *this;
+            }
+    };
+
     IteratorWrapper() = default;
     explicit IteratorWrapper(Container& container) noexcept{
         this->_first = std::begin(container);
         this->_last = std::end(container);
-        this->_cur = this->_first;
+        this->_size = this->_last - this->_first;
     }
-    IteratorWrapper(const IteratorWrapper<Container>& other) noexcept{
+    IteratorWrapper(const Self& other) noexcept{
         this->_first = other._first;
         this->_last = other._last;
-        this->_cur = other._cur;
+        this->_size = this->_last - this->_first;
     }
-    IteratorWrapper(IteratorWrapper<Container>&& other)noexcept{
+    IteratorWrapper(Self&& other)noexcept{
         this->_first = other._first;
         this->_last = other._last;
-        this->_index = other._index;
+        this->_size = this->_last - this->_first;
     }
-    IteratorWrapper<Container>& operator= (const IteratorWrapper<Container>& other){
-        this->_first = other._first;
-        this->_last = other._last;
-        this->_index = other._index;
-        return *this;
+    virtual size_t size(){
+        return this->_size;
     }
-    IteratorWrapper<Container>& operator= (IteratorWrapper<Container>&& other)noexcept{
-        this->_first = other._first;
-        this->_last = other._last;
-        this->_index = other._index;
-        return *this;
+    virtual value_type & get(size_t idx) {
+        return *(this->_first + idx);
+    };
+    InnerIter&  begin(){
+        return InnerIter(*this, 0);
     }
-    IterType  begin(){
-        return this->_first;
+    InnerIter&  end(){
+        return InnerIter(*this, _size);
     }
-    IterType  current(){
-        return this->_cur;
-    }
-    IterType  end(){
-        return this->_last;
+    virtual std::vector<value_type> collection() {
+        std::vector<value_type> result;
+        for(const auto v: *this){
+            result.push_back(v);
+        }
+        return result;
     }
 private:
-    IterType _cur;
-    IterType _first;
-    IterType _last;
+    size_t _size;
+    std_iterator _first;
+    std_iterator _last;
 };
 
-template<typename T, typename IterType, typename Fn>
-struct MapIterator : public Iterator<T, IterType>{
-
+template<typename T, typename Fn>
+struct MapIterator : public Iterator<T>{
     using value_type = T;
-    MapIterator(Iterator<T, IterType>& iterator, Fn  & f): _iter(iterator), _transform(std::forward<decltype(f)>(f)){
+    using Self = MapIterator<T, Fn>;
+    using Super = Iterator<T>;
+    class InnerIter : public Super::InnerIter{
+    public:
+        InnerIter(Super& _iter, size_t n): Super::InnerIter(_iter, n){}
+        bool operator != (const  InnerIter& other){
+            return other._index != this->_index;
+        }
+        value_type& operator* (){
+            return this->_inner_iter.get(this->_index);
+        }
+        const InnerIter& operator++(){
+            ++this->_index;
+            return *this;
+        }
+    };
+    MapIterator(Iterator<T>& iterator, Fn  & f): _iter(iterator), _transform(std::forward<decltype(f)>(f)){
+
     }
-    MapIterator(const MapIterator<T, IterType, Fn> & other){
+    MapIterator(const Self & other){
         this->_iter = other._iter;
         this->_transform = other._transform;
     }
-    MapIterator(MapIterator<T, IterType, Fn>&& other) noexcept {
+    MapIterator(Self&& other) noexcept {
         this->_iter = other._iter;
         this->_transform = other._transform;
     }
-    value_type operator*(){
-        return _transform(*(this->_iter));
+    size_t size(){
+        return this->_iter.size();
     }
-    IterType  begin(){
-        return this->_iter.begin();
+    virtual value_type & get(size_t idx) {
+        auto it = this->begin();
+        for(int i=0;i<idx;++i){
+            ++it;
+        }
+        return *it;
+    };
+    InnerIter&  begin(){
+        return InnerIter(*this, 0);
     }
-    IterType  current(){
-        return this->_iter.current();
+    InnerIter&  end(){
+        return InnerIter(*this, this->_iter.size());
     }
-    IterType  end(){
-        return this->_iter.end();
+    virtual std::vector<value_type> collection() {
+        std::vector<value_type> result;
+        for(const auto v: *this){
+            result.push_back(v);
+        }
+        return result;
     }
 private:
-    Iterator<T, IterType> & _iter;
+    Iterator<T> & _iter;
     Fn _transform;
 };
-template<typename  T, typename IterType, typename Predicate>
-struct FilterIterator: public Iterator<T, IterType>{
-
-    explicit FilterIterator(Iterator<T, IterType>& iterator, Predicate & predicate):_iter(iterator), _predicate(std::forward<decltype(predicate)>(predicate)){
+template<typename  T,  typename Predicate>
+struct FilterIterator: public Iterator<T>{
+    using value_type = T;
+    using Self = FilterIterator<T, Predicate>;
+    using Super = Iterator<T>;
+    class InnerIter : public Super::InnerIter{
+    public:
+        InnerIter(Super& _iter, size_t n): Super::InnerIter(_iter, n){}
+        bool operator != (const  InnerIter& other){
+            return other._index != this->_index;
+        }
+        value_type& operator* (){
+            return this->_inner_iter.get(this->_index);
+        }
+        const InnerIter& operator++(){
+            ++this->_index;
+            return *this;
+        }
+    };
+    explicit FilterIterator(Iterator<T>& iterator, Predicate & predicate):_iter(iterator), _predicate(std::forward<decltype(predicate)>(predicate)){
     }
-    FilterIterator(const FilterIterator<T, IterType, Predicate>& other):_iter(other._iter){
+    FilterIterator(const Self& other):_iter(other._iter){
         this->_predicate = std::forward<Predicate>(_predicate);
     }
-    FilterIterator(FilterIterator<T, IterType, Predicate>&& other) noexcept :_iter(other._iter){
+    FilterIterator(Self&& other) noexcept :_iter(other._iter){
         this->_predicate = std::forward<Predicate>(_predicate);
     }
-    virtual FilterIterator<T, IterType, Predicate>& operator++(){
-        auto cur = this->current();
-        ++cur;
-        for(; !this->_predicate(*cur) && cur != this->end(); ++cur);
-        return *this;
+    size_t size(){
+        size_t n = 0;
+        for (auto cur= this->begin(); cur != this->end(); ++cur){
+            if(this->_predicate(*cur))
+                ++n;
+        }
+        return n;
     }
-    IterType  begin(){
-        return this->_iter.begin();
+    virtual value_type & get(size_t idx) {
+        auto it = this->begin();
+        for(int i=0;i<idx;++i){
+            ++it;
+        }
+        return *it;
+    };
+    InnerIter&  begin(){
+        return InnerIter(*this, 0);
     }
-    IterType  current(){
-        return this->_iter.current();
+    InnerIter&  end(){
+        return InnerIter(*this, this->_iter.size());
     }
-    IterType  end(){
-        return this->_iter.end();
+    virtual std::vector<value_type> collection() {
+        std::vector<value_type> result;
+        for(const auto v: *this){
+            result.push_back(v);
+        }
+        return result;
     }
 private:
-   Iterator<T, IterType> & _iter;
+   Iterator<T> & _iter;
    Predicate _predicate;
 };
 
