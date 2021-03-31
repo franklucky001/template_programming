@@ -46,10 +46,10 @@ struct Iterator {
     virtual InnerIter& end() = 0;
     virtual size_t size() = 0;
     virtual value_type & get(size_t idx) = 0;
+    virtual bool test(value_type& value) {return true;}
     template<typename Fn>
-    auto map(Fn && f)->MapIterator<typename std::result_of_t<Fn(T)>, decltype(f)>{
-        using Return = typename std::result_of_t<Fn(T)>;
-        return MapIterator<Return, decltype(f)>(*this, std::forward<decltype(f)>(f));
+    auto map(Fn && f)->MapIterator<T, decltype(f)>{
+        return MapIterator<T, decltype(f)>(*this, std::forward<decltype(f)>(f));
     }
     template<typename Predicate>
     auto filter(Predicate && predicate) ->FilterIterator<T, decltype(predicate)>{
@@ -123,6 +123,7 @@ private:
 template<typename T, typename Fn>
 struct MapIterator : public Iterator<T>{
     using value_type = T;
+    using result_type = typename std::result_of<Fn(T)>::type;
     using Self = MapIterator<T, Fn>;
     using Super = Iterator<T>;
     class InnerIter : public Super::InnerIter{
@@ -166,10 +167,10 @@ struct MapIterator : public Iterator<T>{
     InnerIter&  end(){
         return InnerIter(*this, this->_iter.size());
     }
-    virtual std::vector<value_type> collection() {
-        std::vector<value_type> result;
+    virtual std::vector<result_type> collection() {
+        std::vector<result_type> result;
         for(const auto v: *this){
-            result.push_back(v);
+            result.push_back(this->_transform(v));
         }
         return result;
     }
@@ -193,6 +194,12 @@ struct FilterIterator: public Iterator<T>{
         }
         const InnerIter& operator++(){
             ++this->_index;
+            auto inner = this->_inner_iter;
+            auto cur=*this;
+            while (cur != inner.end() && inner.test(*cur)){
+                ++this ->_index;
+                cur = *this;
+            }
             return *this;
         }
     };
@@ -219,6 +226,9 @@ struct FilterIterator: public Iterator<T>{
         }
         return *it;
     };
+    bool test(value_type& value){
+        return this->_predicate(value);
+    }
     InnerIter&  begin(){
         return InnerIter(*this, 0);
     }
