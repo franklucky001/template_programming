@@ -6,7 +6,7 @@
 #define TEMPLATE_PROGRAMMING_ITERATOR_HPP
 #include <algorithm>
 #include <vector>
-#include "../function_tools/function_trait.hpp"
+//#include "../function_tools/function_trait.hpp"
 
 using namespace std;
 
@@ -49,7 +49,8 @@ struct Iterator {
     virtual bool test(value_type& value) {return true;}
     template<typename Fn>
     auto map(Fn && f)->MapIterator<T, decltype(f)>{
-        return MapIterator<T, decltype(f)>(*this, std::forward<decltype(f)>(f));
+        using Return = typename std::result_of<Fn(T)>::type;
+        return MapIterator<Return , decltype(f)>(*this, std::forward<decltype(f)>(f));
     }
     template<typename Predicate>
     auto filter(Predicate && predicate) ->FilterIterator<T, decltype(predicate)>{
@@ -123,7 +124,6 @@ private:
 template<typename T, typename Fn>
 struct MapIterator : public Iterator<T>{
     using value_type = T;
-    using result_type = typename std::result_of<Fn(T)>::type;
     using Self = MapIterator<T, Fn>;
     using Super = Iterator<T>;
     class InnerIter : public Super::InnerIter{
@@ -140,7 +140,7 @@ struct MapIterator : public Iterator<T>{
             return *this;
         }
     };
-    MapIterator(Iterator<T>& iterator, Fn  & f): _iter(iterator), _transform(std::forward<decltype(f)>(f)){
+    MapIterator(Iterator<T>& iterator, Fn  && f): _iter(iterator), _transform(std::forward<decltype(f)>(f)){
 
     }
     MapIterator(const Self & other){
@@ -155,11 +155,8 @@ struct MapIterator : public Iterator<T>{
         return this->_iter.size();
     }
     virtual value_type & get(size_t idx) {
-        auto it = this->begin();
-        for(int i=0;i<idx;++i){
-            ++it;
-        }
-        return *it;
+        auto value = this->_iter.get(idx);
+        return this->_transform(value);
     };
     bool test(value_type& value){
         return this->_iter.test(value);
@@ -170,10 +167,10 @@ struct MapIterator : public Iterator<T>{
     InnerIter&  end(){
         return InnerIter(*this, this->_iter.size());
     }
-    virtual std::vector<result_type> collection() {
-        std::vector<result_type> result;
+    virtual std::vector<value_type> collection() {
+        std::vector<value_type> result;
         for(const auto v: *this){
-            result.push_back(this->_transform(v));
+            result.push_back(v);
         }
         return result;
     }
@@ -206,7 +203,7 @@ struct FilterIterator: public Iterator<T>{
             return *this;
         }
     };
-    explicit FilterIterator(Iterator<T>& iterator, Predicate & predicate):_iter(iterator), _predicate(std::forward<decltype(predicate)>(predicate)){
+    explicit FilterIterator(Iterator<T>& iterator, Predicate && predicate):_iter(iterator), _predicate(std::forward<decltype(predicate)>(predicate)){
     }
     FilterIterator(const Self& other):_iter(other._iter){
         this->_predicate = std::forward<Predicate>(_predicate);
@@ -223,11 +220,12 @@ struct FilterIterator: public Iterator<T>{
         return n;
     }
     virtual value_type & get(size_t idx) {
-        auto it = this->begin();
-        for(int i=0;i<idx;++i){
-            ++it;
+        value_type  value;
+        for(int i=0, j=0; j<idx;++i){
+            value = this->_iter.get(j);
+            if(this->_predicate(value))++j;
         }
-        return *it;
+        return value;
     };
     bool test(value_type& value){
         return this->_predicate(value) && this->_iter.test(value);
